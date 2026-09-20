@@ -1,0 +1,41 @@
+﻿trigger: none
+
+stages:
+- stage: DeployDev
+  displayName: 'Deploy to Dev AKS'
+  condition: eq(variables['Build.SourceBranch'], 'refs/heads/develop')
+  jobs:
+  - deployment: DevDeploy
+    environment: 'Dev-Environment'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: HelmDeploy@2
+            inputs:
+              connectionType: 'Azure Resource Manager'
+              azureSubscriptionEndpoint: 'Azure-Dev-Subscription'
+              azureResourceGroup: 'rg-dev-aks'
+              kubernetesCluster: 'dev-aks'
+              command: 'upgrade'
+              chartType: 'FilePath'
+              chartPath: './helm/app-chart'
+              releaseName: 'app-dev'
+              overrideValues: 'image.tag=$(Build.SourceVersion),environment=dev'
+
+- stage: DeployProd
+  displayName: 'Deploy to Prod AKS (Blue/Green)'
+  condition: or(eq(variables['Build.SourceBranch'], 'refs/heads/main'), startsWith(variables['Build.SourceBranch'], 'refs/heads/hotfix/'))
+  jobs:
+  - deployment: ProdDeploy
+    environment: 'Prod-Environment'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - script: |
+              helm upgrade --install app-prod-green ./helm/app-chart \
+                -f ./helm/app-chart/values-prod.yaml \
+                --set image.tag=$(Build.SourceVersion) \
+                --set slot=green
+            displayName: 'Deploy Green Slot'

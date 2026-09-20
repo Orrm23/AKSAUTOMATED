@@ -1,0 +1,54 @@
+﻿trigger:
+  branches:
+    include:
+      - main
+      - develop
+      - release/*
+      - hotfix/*
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  acrName: 'acrprodenterprise'
+  imageName: 'my-microservice'
+  imageTag: '$(Build.SourceVersion)'
+  keyVaultUri: 'azurekms://kv-prod-security.vault.azure.net/cosign-signing-key'
+
+stages:
+- stage: CI_Build_Scan_Sign
+  displayName: 'CI: Build, Trivy Scan & Cosign Sign'
+  jobs:
+  - job: BuildAndSign
+    steps:
+    - script: npm ci && npm test
+      displayName: 'Unit Testing'
+
+    - task: Docker@2
+      displayName: 'Build Docker Image'
+      inputs:
+        command: 'build'
+        repository: '$(imageName)'
+        dockerfile: '**/Dockerfile'
+        tags: '$(imageTag)'
+
+    - script: |
+        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+        trivy image --exit-code 1 --severity CRITICAL $(imageName):$(imageTag)
+      displayName: 'Run Trivy Vulnerability Scan'
+
+    - task: AzureCLI@2
+      displayName: 'Push to ACR & Sign with Cosign'
+      inputs:
+        azureSubscription: 'Azure-ACR-ServiceConnection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          az acr login --name $(acrName)
+          docker tag $(imageName):$(imageTag) $(acrName).azurecr.io/$(imageName):$(imageTag)
+          docker push $(acrName).azurecr.io/$(imageName):$(imageTag)
+          
+          wget https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64
+          mv cosign-linux-amd64 /usr/local/bin/cosign
+          chmod +x /usr/local/bin/cosign
+          cosign sign --yes --key $(keyVaultUri) $(acrName).azurecr.io/$(imageName):$(imageTag)

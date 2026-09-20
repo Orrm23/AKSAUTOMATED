@@ -1,0 +1,22 @@
+﻿replicaCount: 2
+
+image:
+  repository: acrprodenterprise.azurecr.io/my-microservice
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+ingress:
+  enabled: true
+  className: azure-application-gateway
+  annotations:
+    appgw.ingress.kubernetes.io/ssl-redirect: "false"
+  hosts:
+    - host: poc.mycompany.com
+      paths:
+        - path: /
+          pathType: Prefix
